@@ -183,6 +183,24 @@ public class RetrofitProcessor extends AbstractProcessor {
       this.onAnnotationForProperty = onAnnotationForProperty;
   }
 
+  public static class Part {
+    private final String name;
+    private final String type;
+
+    public Part(String name, String type) {
+        this.name = name;
+        this.type = type;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public String getType() {
+        return type;
+    }
+  }
+
   /**
    * A property of an {@code @Retrofit} class, defined by one of its abstract methods.
    * An instance of this class is made available to the Velocity template engine for
@@ -211,6 +229,9 @@ public class RetrofitProcessor extends AbstractProcessor {
     private final ProcessingEnvironment processingEnv;
     private final TypeSimplifier typeSimplifier;
     private final List<String> permissions;
+    private final Map<String, String> headers;
+    private final Map<String, String> fields;
+    private final Map<String, Part> parts;
 
     Property(
         String name,
@@ -241,6 +262,9 @@ public class RetrofitProcessor extends AbstractProcessor {
       this.callbackArg = buildCallbackArg(method);
       if ("".equals(typeArgs)) typeArgs = callbackType;
       this.permissions = buildPermissions(method);
+      this.headers = buildHeaders(method);
+      this.fields = buildFields(method);
+      this.parts = buildParts(method);
     }
 
     private String buildTypeArguments(String type) {
@@ -287,6 +311,11 @@ public class RetrofitProcessor extends AbstractProcessor {
         return method.getAnnotation(retrofit.Retrofit.POST.class) != null;
     }
 
+    public boolean buildIsPut(ExecutableElement method) {
+        // TODO duplicated routine
+        return method.getAnnotation(retrofit.Retrofit.PUT.class) != null;
+    }
+
     public boolean buildIsDelete(ExecutableElement method) {
         // TODO duplicated routine
         return method.getAnnotation(retrofit.Retrofit.DELETE.class) != null;
@@ -311,12 +340,58 @@ public class RetrofitProcessor extends AbstractProcessor {
 
     public List<String> buildPermissions(ExecutableElement method) {
       retrofit.Retrofit.GET get = method.getAnnotation(retrofit.Retrofit.GET.class);
+      retrofit.Retrofit.PUT put = method.getAnnotation(retrofit.Retrofit.PUT.class);
       retrofit.Retrofit.POST post = method.getAnnotation(retrofit.Retrofit.POST.class);
       retrofit.Retrofit.DELETE delete = method.getAnnotation(retrofit.Retrofit.DELETE.class);
       if (get != null) return Arrays.asList(get.permissions());
+      if (put != null) return Arrays.asList(put.permissions());
       if (post != null) return Arrays.asList(post.permissions());
       if (delete != null) return Arrays.asList(delete.permissions());
       return Collections.emptyList();
+    }
+
+    public Map<String, String> buildHeaders(ExecutableElement method) {
+      Map<String, String> map = new HashMap<String, String>();
+      retrofit.Retrofit.Headers arrayAnnotation = method.getAnnotation(retrofit.Retrofit.Headers.class);
+      if (arrayAnnotation == null) return Collections.emptyMap();
+
+      String[] headers = arrayAnnotation.value;
+      for (header : headers) {
+        tokens = header.split(":");
+        map.put(token[0].trim(), token[1].trim());
+      }
+
+      return map;
+    }
+
+    public Map<String, String> buildFields(ExecutableElement method) {
+      Map<String, String> map = new HashMap<String, String>();
+      // TODO FieldMap
+
+      List<? extends VariableElement> parameters = method.getParameters();
+      for (VariableElement parameter : parameters) {
+        retrofit.Retrofit.Field field = parameter
+          .getAnnotation(retrofit.Retrofit.Field.class);
+        if (field == null) continue;
+
+        String key = field.value().equals("") ? parameter.getSimpleName().toString() : field.value();
+        map.put(key, parameter.getSimpleName().toString());
+      }
+    }
+
+    public Map<String, Part> buildParts(ExecutableElement method) {
+      Map<String, Part> map = new HashMap<String, Part>();
+
+      List<? extends VariableElement> parameters = method.getParameters();
+      for (VariableElement parameter : parameters) {
+        retrofit.Retrofit.Part part = parameter
+          .getAnnotation(retrofit.Retrofit.Part.class);
+        if (part == null) continue;
+
+        String key = part.value().equals("") ? parameter.getSimpleName().toString() : part.value();
+        map.put(key, new Part(parameter.getSimpleName().toString(), part.type));
+      }
+      return map;
     }
 
     // /{postId}
@@ -324,14 +399,7 @@ public class RetrofitProcessor extends AbstractProcessor {
     // "/" + userIdA + "/friends/" + userIdB
     // "/" + userIdA + "/friends/" + userIdB + ""
     public String buildPath(ExecutableElement method) {
-      // TODO duplicated routine
-      retrofit.Retrofit.GET get = method.getAnnotation(retrofit.Retrofit.GET.class);
-      retrofit.Retrofit.POST post = method.getAnnotation(retrofit.Retrofit.POST.class);
-      retrofit.Retrofit.DELETE delete = method.getAnnotation(retrofit.Retrofit.DELETE.class);
-      String fullPath = null;
-      if (get != null) fullPath = get.value();
-      if (post != null) fullPath = post.value();
-      if (delete != null) fullPath = delete.value();
+      String fullPath = buildRawPath(method);
 
       List<? extends VariableElement> parameters = method.getParameters();
       for (VariableElement parameter : parameters) {
@@ -349,41 +417,42 @@ public class RetrofitProcessor extends AbstractProcessor {
       return fullPath.replaceAll("\\?.+", "");
     }
 
+    public String buildRawPath(ExecutableElement method) {
+      // TODO duplicated routine
+      retrofit.Retrofit.GET get = method.getAnnotation(retrofit.Retrofit.GET.class);
+      retrofit.Retrofit.PUT put = method.getAnnotation(retrofit.Retrofit.PUT.class);
+      retrofit.Retrofit.POST post = method.getAnnotation(retrofit.Retrofit.POST.class);
+      retrofit.Retrofit.DELETE delete = method.getAnnotation(retrofit.Retrofit.DELETE.class);
+      String rawPath = null;
+      if (get != null) rawPath = get.value();
+      if (put != null) rawPath = put.value();
+      if (post != null) rawPath = post.value();
+      if (delete != null) rawPath = delete.value();
+      return rawPath;
+    }
+
     public Map<String, String> buildQueries(ExecutableElement method) {
       Map<String, String> map = new HashMap<String, String>();
 
-      // TODO duplicated routine
-      retrofit.Retrofit.GET get = method.getAnnotation(retrofit.Retrofit.GET.class);
-      retrofit.Retrofit.POST post = method.getAnnotation(retrofit.Retrofit.POST.class);
-      retrofit.Retrofit.DELETE delete = method.getAnnotation(retrofit.Retrofit.DELETE.class);
-      String fullPath = null;
-      if (get != null) fullPath = get.value();
-      if (post != null) fullPath = post.value();
-      if (delete != null) fullPath = delete.value();
-
+      String fullPath = buildRawPath(method);
       if (fullPath.indexOf("?") != -1) {
         fullPath = fullPath.replaceAll("^.*\\?", "");
         String[] queries = fullPath.split("&");
         for (String query : queries) {
           String[] keyValue = query.split("=");
-          map.put("\"" + keyValue[0] + "\"", "\"" + keyValue[1] + "\"");
+          map.put(keyValue[0], keyValue[1]);
         }
       }
 
       List<? extends VariableElement> parameters = method.getParameters();
       for (VariableElement parameter : parameters) {
         retrofit.Retrofit.Query query = parameter
-            .getAnnotation(retrofit.Retrofit.Query.class);
+          .getAnnotation(retrofit.Retrofit.Query.class);
         if (query == null) {
           continue;
         }
 
-        if (!query.value().equals("")) {
-          map.put("\"" + query.value() + "\"", parameter.getSimpleName().toString());
-        } else {
-          map.put("\"" + parameter.getSimpleName().toString() + "\"",
-              parameter.getSimpleName().toString());
-        }
+        String key = query.value().equals("") ? parameter.getSimpleName().toString() : query.value();
       }
 
       return map;
@@ -572,6 +641,10 @@ public class RetrofitProcessor extends AbstractProcessor {
 
     public List<String> getQueryBundles() {
       return queryBundles;
+    }
+
+    public Map<String, String> getHeaders() {
+      return headers;
     }
 
     public boolean isNullable() {
